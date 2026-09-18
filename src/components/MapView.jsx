@@ -13,6 +13,12 @@ L.Icon.Default.mergeOptions({
   shadowUrl: markerShadow,
 })
 
+// Colorblind-safe palette (Okabe-Ito), chosen so trail vs. street reads
+// clearly regardless of color vision, and arrows share the same hue as the
+// segment they're on rather than standing out as an unrelated accent color.
+const TRAIL_COLOR = '#009E73' // bluish green
+const STREET_COLOR = '#0072B2' // blue
+
 export default function MapView({ start, polylineRuns, directionArrows }) {
   const mapRef = useRef(null)
   const containerRef = useRef(null)
@@ -25,9 +31,13 @@ export default function MapView({ start, polylineRuns, directionArrows }) {
       zoomControl: true,
     }).setView([39.9526, -75.1652], 13)
 
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+      // A muted, mostly-monochrome basemap (CARTO Positron) so the route
+      // itself is the most visually prominent thing on the map, instead of
+      // competing with a busy, colorful default street-map style.
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
       maxZoom: 19,
+      subdomains: 'abcd',
     }).addTo(map)
 
     layerGroupRef.current = L.layerGroup().addTo(map)
@@ -67,7 +77,7 @@ export default function MapView({ start, polylineRuns, directionArrows }) {
     if (polylineRuns && polylineRuns.length > 0) {
       const bounds = []
       for (const run of polylineRuns) {
-        const color = run.isTrail ? '#35503F' : '#2B6CA3'
+        const color = run.isTrail ? TRAIL_COLOR : STREET_COLOR
         L.polyline(run.points, {
           color,
           weight: run.isTrail ? 5 : 4,
@@ -84,12 +94,13 @@ export default function MapView({ start, polylineRuns, directionArrows }) {
 
     if (directionArrows && directionArrows.length > 0) {
       for (const arrow of directionArrows) {
+        const color = arrow.isTrail ? TRAIL_COLOR : STREET_COLOR
         const icon = L.divIcon({
           className: 'direction-arrow-icon',
           html: `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;transform:rotate(${arrow.bearing}deg)">
-            <svg width="14" height="14" viewBox="0 0 14 14"><polygon points="7,1 12,12 7,8.5 2,12" fill="#C68A1E" stroke="#20261D" stroke-width="0.75"/></svg>
+            <svg width="15" height="15" viewBox="0 0 14 14"><polygon points="7,1 12,12 7,8.5 2,12" fill="${color}" stroke="#ffffff" stroke-width="1"/></svg>
           </div>`,
-          iconSize: [14, 14],
+          iconSize: [15, 15],
           iconAnchor: [7, 7],
         })
         L.marker([arrow.lat, arrow.lon], { icon, interactive: false }).addTo(layerGroup)

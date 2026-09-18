@@ -11,20 +11,8 @@ function metersToFeet(m) {
 export default function RouteStats({ summary, segments, onRegenerate, regenerating, onExportTcx, onExportGpx, elevation }) {
   if (!summary) return null
 
-  const lapsWhole = Math.floor(summary.laps)
-  const hasRemainder = summary.hasRemainderLoop
-
   return (
     <div className="stats-card">
-      {summary.laps > 1 && (
-        <p className="laps-note">
-          This neighborhood doesn't have enough new road within range for one loop that long, so
-          this route is your best <strong>{fmtMiles(summary.lapDistanceMeters)} mi</strong> loop
-          run <strong>{lapsWhole}×</strong>
-          {hasRemainder ? ', plus one shorter closing loop' : ''} to land close to your target
-          distance.
-        </p>
-      )}
       {!summary.withinTolerance && (
         <p className="tolerance-note">
           Closest we could get on this street network: off by{' '}

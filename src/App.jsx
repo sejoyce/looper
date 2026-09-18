@@ -2,29 +2,27 @@ import { useState, useRef, useCallback } from 'react'
 import RouteForm from './components/RouteForm'
 import RouteStats from './components/RouteStats'
 import MapView from './components/MapView'
+import RouteThumbnail from './components/RouteThumbnail'
 import { geocodeAddress, fetchStreetGraph } from './lib/osm'
 import { buildGraph, snapStartToNetwork, analyzeDeadEnds } from './lib/graph'
 import { generateLoopRoute, summarizeSegments, routeToPolylineRuns, computeDirectionArrows } from './lib/routeGenerator'
 import { computeRouteElevation } from './lib/elevation'
 import { buildTcxCourse, buildGpx, downloadFile } from './lib/exportCourse'
 import { milesToMeters, radiusForTargetMiles } from './lib/geo'
+import { compareRoutes, isMeaningfullyWorse } from './lib/routeComparison'
 
 const STAGES = {
   IDLE: 'idle',
   GEOCODING: 'geocoding',
   FETCHING: 'fetching',
   PLOTTING: 'plotting',
-  ELEVATION: 'elevation',
   DONE: 'done',
   ERROR: 'error',
 }
 
 const METERS_PER_FOOT = 0.3048
+const MAX_HISTORY = 8
 
-// When an elevation preference is set, we need elevation for several
-// candidates before picking a winner, so that part stays synchronous
-// (blocking) - there's no way around it if the choice depends on it. This
-// returns the chosen route and its elevation together.
 async function pickBestCandidateWithElevation(graph, startNodeId, targetMeters, seed, elevationPrefs) {
   const candidates = []
   for (let i = 0; i < 5; i++) {
@@ -69,6 +67,7 @@ export default function App() {
   const [maxElevation, setMaxElevation] = useState('')
   const [stage, setStage] = useState(STAGES.IDLE)
   const [error, setError] = useState(null)
+  const [notice, setNotice] = useState(null)
   const [start, setStart] = useState(null)
   const [summary, setSummary] = useState(null)
   const [segments, setSegments] = useState(null)
@@ -76,13 +75,16 @@ export default function App() {
   const [directionArrows, setDirectionArrows] = useState(null)
   const [elevation, setElevation] = useState(null)
   const [regenerating, setRegenerating] = useState(false)
+  const [history, setHistory] = useState([])
+  const [activeHistoryId, setActiveHistoryId] = useState(null)
 
   const graphRef = useRef(null)
   const startNodeRef = useRef(null)
   const targetMetersRef = useRef(null)
   const seedRef = useRef(0)
+  const historyIdRef = useRef(0)
 
-  const loading = [STAGES.GEOCODING, STAGES.FETCHING, STAGES.PLOTTING, STAGES.ELEVATION].includes(stage)
+  const loading = [STAGES.GEOCODING, STAGES.FETCHING, STAGES.PLOTTING].includes(stage)
 
   function currentElevationPrefs() {
     const minFt = parseFloat(minElevation)
@@ -97,8 +99,6 @@ export default function App() {
     const hasPref = elevationPrefs.minFt != null || elevationPrefs.maxFt != null
 
     if (hasPref) {
-      // Need elevation on several candidates before we can even pick a
-      // winner, so this path has to block on it.
       const planned = await pickBestCandidateWithElevation(graph, startNodeId, targetMeters, seed, elevationPrefs)
       if (!planned) return null
       return {
@@ -111,10 +111,15 @@ export default function App() {
       }
     }
 
-    // No preference: the route itself doesn't depend on elevation at all,
-    // so show it immediately and let elevation populate a moment later
-    // instead of making the whole result wait on a network round trip.
-    const route = generateLoopRoute(graph, startNodeId, targetMeters, { seed })
+    // No elevation preference: try a few seeds and keep the best one, so a
+    // single unlucky attempt doesn't produce a worse result than the area
+    // actually supports. The route doesn't depend on elevation at all here,
+    // so show it immediately and let elevation populate a moment later.
+    let route = null
+    for (let i = 0; i < 3; i++) {
+      const candidate = generateLoopRoute(graph, startNodeId, targetMeters, { seed: seed + i * 13337 })
+      if (candidate && (!route || compareRoutes(candidate, route) < 0)) route = candidate
+    }
     if (!route) return null
     return {
       summary: route,
@@ -126,13 +131,42 @@ export default function App() {
     }
   }, [])
 
+  function pushHistory(result) {
+    const id = ++historyIdRef.current
+    setHistory((prev) => {
+      const next = [...prev, { id, ...result }]
+      return next.length > MAX_HISTORY ? next.slice(next.length - MAX_HISTORY) : next
+    })
+    setActiveHistoryId(id)
+    return id
+  }
+
+  function applyResult(result, historyId) {
+    setSummary(result.summary)
+    setSegments(result.segments)
+    setPolylineRuns(result.polylineRuns)
+    setDirectionArrows(result.directionArrows)
+    setElevation(result.elevation)
+    if (result.elevationPromise) {
+      result.elevationPromise.then((elev) => {
+        setElevation(elev)
+        if (historyId != null) {
+          setHistory((prev) => prev.map((h) => (h.id === historyId ? { ...h, elevation: elev } : h)))
+        }
+      })
+    }
+  }
+
   async function handleSubmit() {
     setError(null)
+    setNotice(null)
     setSummary(null)
     setSegments(null)
     setPolylineRuns(null)
     setDirectionArrows(null)
     setElevation(null)
+    setHistory([])
+    setActiveHistoryId(null)
 
     const targetMiles = parseFloat(miles)
     if (!targetMiles || targetMiles <= 0) {
@@ -156,17 +190,12 @@ export default function App() {
         throw new Error('No street data found near that address. Try a slightly different address.')
       }
 
-      // Snap the route's start/finish onto the exact closest point on the
-      // street network (splitting a segment if needed), rather than just
-      // the nearest existing intersection - this is what keeps the loop's
-      // start tight to the actual address instead of drifting to whatever
-      // corner happens to be nearby.
       const startNodeId = snapStartToNetwork(graph, location.lat, location.lon)
       if (startNodeId == null) {
         throw new Error('No street data found near that address. Try a slightly different address.')
       }
       graph.startNodeId = startNodeId
-      analyzeDeadEnds(graph) // must run after snapping, so it reflects the final topology
+      analyzeDeadEnds(graph)
 
       graphRef.current = graph
       startNodeRef.current = startNodeId
@@ -182,15 +211,9 @@ export default function App() {
         )
       }
 
-      setSummary(result.summary)
-      setSegments(result.segments)
-      setPolylineRuns(result.polylineRuns)
-      setDirectionArrows(result.directionArrows)
-      setElevation(result.elevation)
+      const id = pushHistory(result)
+      applyResult(result, id)
       setStage(STAGES.DONE)
-      if (result.elevationPromise) {
-        result.elevationPromise.then((elev) => setElevation(elev))
-      }
     } catch (err) {
       setError(err.message || 'Something went wrong finding a route.')
       setStage(STAGES.ERROR)
@@ -198,25 +221,36 @@ export default function App() {
   }
 
   async function handleRegenerate() {
-    if (!graphRef.current || !startNodeRef.current) return
+    if (!graphRef.current || !startNodeRef.current || !summary) return
     setRegenerating(true)
+    setNotice(null)
     seedRef.current += 1
     try {
       const elevationPrefs = currentElevationPrefs()
       const result = await plot(graphRef.current, startNodeRef.current, targetMetersRef.current, seedRef.current, elevationPrefs)
-      if (result) {
-        setSummary(result.summary)
-        setSegments(result.segments)
-        setPolylineRuns(result.polylineRuns)
-        setDirectionArrows(result.directionArrows)
-        setElevation(result.elevation)
-        if (result.elevationPromise) {
-          result.elevationPromise.then((elev) => setElevation(elev))
-        }
+
+      if (!result || isMeaningfullyWorse(result.summary, summary)) {
+        setNotice(
+          "That's the best loop this street network has to offer near your target - no better distinct option found. Showing your last result."
+        )
+        return
       }
+
+      const id = pushHistory(result)
+      applyResult(result, id)
     } finally {
       setRegenerating(false)
     }
+  }
+
+  function handleSelectHistory(entry) {
+    setActiveHistoryId(entry.id)
+    setNotice(null)
+    setSummary(entry.summary)
+    setSegments(entry.segments)
+    setPolylineRuns(entry.polylineRuns)
+    setDirectionArrows(entry.directionArrows)
+    setElevation(entry.elevation)
   }
 
   function handleExportTcx() {
@@ -236,7 +270,6 @@ export default function App() {
       <header className="app-header">
         <div className="header-inner">
           <h1>Looper</h1>
-          <p className="tagline">Trail-first running loops from your front door.</p>
         </div>
         <svg className="header-squiggle" viewBox="0 0 400 24" preserveAspectRatio="none" aria-hidden="true">
           <polyline
@@ -268,8 +301,8 @@ export default function App() {
           {stage === STAGES.GEOCODING && <p className="status-line">Locating your address…</p>}
           {stage === STAGES.FETCHING && <p className="status-line">Reading streets and trails nearby…</p>}
           {stage === STAGES.PLOTTING && <p className="status-line">Testing routes for the best loop…</p>}
-          {stage === STAGES.ELEVATION && <p className="status-line">Checking elevation…</p>}
           {error && <p className="status-line status-error">{error}</p>}
+          {notice && <p className="tolerance-note">{notice}</p>}
 
           {summary && (
             <RouteStats
@@ -281,6 +314,25 @@ export default function App() {
               onExportTcx={handleExportTcx}
               onExportGpx={handleExportGpx}
             />
+          )}
+
+          {history.length > 1 && (
+            <div className="history-section">
+              <span className="field-label">Loops you've generated</span>
+              <div className="history-strip">
+                {history.map((entry) => (
+                  <button
+                    key={entry.id}
+                    className={`history-thumb${entry.id === activeHistoryId ? ' is-active' : ''}`}
+                    onClick={() => handleSelectHistory(entry)}
+                    title={`${(entry.summary.distanceMeters / 1609.344).toFixed(2)} mi`}
+                  >
+                    <RouteThumbnail polylineRuns={entry.polylineRuns} />
+                    <span className="history-thumb-label">{(entry.summary.distanceMeters / 1609.344).toFixed(2)} mi</span>
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
 
           <p className="legend">

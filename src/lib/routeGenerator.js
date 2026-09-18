@@ -1,6 +1,7 @@
 import { MinHeap } from './minHeap.js'
 import { bearing, angleDiff, haversine, milesToMeters, metersToMiles } from './geo.js'
 import { pickTargetCluster } from './trailSeeking.js'
+import { selectHullNodeIds } from './backbone.js'
 
 // --- Turn geometry ---------------------------------------------------------
 
@@ -29,6 +30,7 @@ function classifyTurn(graph, prevEdge, nextEdge) {
 function edgeWeight(graph, edge, toNode, prevEdge, usedForward) {
   let w = edge.distance
   if (edge.isTrail) w *= 0.5
+  if (graph.backboneEdges?.has(edge.key)) w *= 0.55
   if (toNode?.hasSignal) w *= 1.12
   if (usedForward.has(edge.key)) w *= 1.75
 
@@ -532,6 +534,51 @@ function findWaypointLoop(graph, startId, targetMeters, options = {}) {
   return best
 }
 
+// Finds the outer perimeter of the reachable street network (the convex
+// hull of nearby nodes) and connects it into a rough loop back to the
+// start, using the same turn-aware, dead-end-safe, busy-road-safe pathing
+// as everything else. This isn't used as a route by itself - its edges get
+// a weight discount in edgeWeight() so the main search is drawn toward
+// following long perimeter stretches instead of winding through interior
+// side streets, the way an actual runner would naturally prefer the big
+// loop around a neighborhood over a maze of turns through the middle of
+// it. Computed once per graph and cached, since it doesn't depend on the
+// specific attempt/seed.
+function computeBackboneLoop(graph, startId, targetMeters) {
+  const maxReachMeters = Math.max(500, targetMeters * 0.5)
+  const hullNodeIds = selectHullNodeIds(graph, startId, maxReachMeters)
+  if (hullNodeIds.length < 3) return new Set()
+
+  // Start the perimeter walk from whichever hull node is closest to home,
+  // so joining the backbone isn't itself a long detour.
+  const startNode = graph.nodes.get(startId)
+  let bestIdx = 0
+  let bestDist = Infinity
+  hullNodeIds.forEach((id, i) => {
+    const n = graph.nodes.get(id)
+    const d = haversine(startNode.lat, startNode.lon, n.lat, n.lon)
+    if (d < bestDist) {
+      bestDist = d
+      bestIdx = i
+    }
+  })
+  const ordered = hullNodeIds.slice(bestIdx).concat(hullNodeIds.slice(0, bestIdx))
+  const sequence = [startId, ...ordered, startId]
+
+  const backboneEdges = new Set()
+  const usedForward = new Set()
+  for (let i = 0; i < sequence.length - 1; i++) {
+    if (sequence[i] === sequence[i + 1]) continue
+    const leg = shortestPathBack(graph, sequence[i], sequence[i + 1], usedForward, { timeBudgetMs: 700 })
+    if (!leg) continue // an unreachable hull point just gets skipped, not fatal
+    for (const key of leg.path) {
+      backboneEdges.add(key)
+      usedForward.add(key)
+    }
+  }
+  return backboneEdges
+}
+
 // --- Public entry point -----------------------------------------------------
 // Strategy:
 //  1. Try to find a single loop within toleranceMeters of the target by
@@ -562,6 +609,9 @@ function combinedScore(route) {
 }
 
 export function generateLoopRoute(graph, startNodeId, targetMeters, options = {}) {
+  if (!graph.backboneEdges) {
+    graph.backboneEdges = computeBackboneLoop(graph, startNodeId, targetMeters)
+  }
   const toleranceMeters = options.toleranceMeters ?? milesToMeters(0.05)
   const seed = options.seed ?? Date.now()
 
@@ -690,6 +740,7 @@ export function computeDirectionArrows(graph, edgeKeys, spacingMeters = 220) {
         lat: (from.lat + to.lat) / 2,
         lon: (from.lon + to.lon) / 2,
         bearing: bearing(from.lat, from.lon, to.lat, to.lon),
+        isTrail: edge.isTrail,
       })
       sinceLast = 0
     }
