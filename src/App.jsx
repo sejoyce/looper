@@ -20,6 +20,12 @@ const STAGES = {
   ERROR: 'error',
 }
 
+const STAGE_MESSAGES = {
+  [STAGES.GEOCODING]: 'Locating your address…',
+  [STAGES.FETCHING]: 'Reading streets and trails nearby…',
+  [STAGES.PLOTTING]: 'Testing routes for the best loop…',
+}
+
 const METERS_PER_FOOT = 0.3048
 const MAX_HISTORY = 8
 
@@ -74,7 +80,6 @@ export default function App() {
   const [polylineRuns, setPolylineRuns] = useState(null)
   const [directionArrows, setDirectionArrows] = useState(null)
   const [elevation, setElevation] = useState(null)
-  const [regenerating, setRegenerating] = useState(false)
   const [history, setHistory] = useState([])
   const [activeHistoryId, setActiveHistoryId] = useState(null)
 
@@ -83,8 +88,10 @@ export default function App() {
   const targetMetersRef = useRef(null)
   const seedRef = useRef(0)
   const historyIdRef = useRef(0)
+  const lastGeneratedRef = useRef(null) // { address, miles, minFt, maxFt }
 
   const loading = [STAGES.GEOCODING, STAGES.FETCHING, STAGES.PLOTTING].includes(stage)
+  const hasRoute = !!summary
 
   function currentElevationPrefs() {
     const minFt = parseFloat(minElevation)
@@ -111,10 +118,6 @@ export default function App() {
       }
     }
 
-    // No elevation preference: try a few seeds and keep the best one, so a
-    // single unlucky attempt doesn't produce a worse result than the area
-    // actually supports. The route doesn't depend on elevation at all here,
-    // so show it immediately and let elevation populate a moment later.
     let route = null
     for (let i = 0; i < 3; i++) {
       const candidate = generateLoopRoute(graph, startNodeId, targetMeters, { seed: seed + i * 13337 })
@@ -157,7 +160,18 @@ export default function App() {
     }
   }
 
-  async function handleSubmit() {
+  function sameAsLastGenerated(elevationPrefs) {
+    const last = lastGeneratedRef.current
+    if (!last) return false
+    return (
+      last.address === address &&
+      last.miles === miles &&
+      last.minFt === elevationPrefs.minFt &&
+      last.maxFt === elevationPrefs.maxFt
+    )
+  }
+
+  async function runFreshSearch() {
     setError(null)
     setNotice(null)
     setSummary(null)
@@ -211,6 +225,7 @@ export default function App() {
         )
       }
 
+      lastGeneratedRef.current = { address, miles, minFt: elevationPrefs.minFt, maxFt: elevationPrefs.maxFt }
       const id = pushHistory(result)
       applyResult(result, id)
       setStage(STAGES.DONE)
@@ -220,10 +235,10 @@ export default function App() {
     }
   }
 
-  async function handleRegenerate() {
-    if (!graphRef.current || !startNodeRef.current || !summary) return
-    setRegenerating(true)
+  async function runRegenerate() {
+    setError(null)
     setNotice(null)
+    setStage(STAGES.PLOTTING)
     seedRef.current += 1
     try {
       const elevationPrefs = currentElevationPrefs()
@@ -238,8 +253,25 @@ export default function App() {
 
       const id = pushHistory(result)
       applyResult(result, id)
+    } catch (err) {
+      setError(err.message || 'Something went wrong finding another route.')
     } finally {
-      setRegenerating(false)
+      setStage(STAGES.DONE)
+    }
+  }
+
+  // One button drives both flows: if the address/mileage/elevation
+  // preferences haven't changed since the last generation, "regenerate" on
+  // the same street data; otherwise (or on the very first run) do the full
+  // fresh search. This is also what lets the button's own label ("Find my
+  // loop" vs "Try a different loop") stay in sync with what will actually
+  // happen when it's clicked.
+  async function handleGenerate() {
+    const elevationPrefs = currentElevationPrefs()
+    if (hasRoute && graphRef.current && sameAsLastGenerated(elevationPrefs)) {
+      await runRegenerate()
+    } else {
+      await runFreshSearch()
     }
   }
 
@@ -294,13 +326,11 @@ export default function App() {
             setMinElevation={setMinElevation}
             maxElevation={maxElevation}
             setMaxElevation={setMaxElevation}
-            onSubmit={handleSubmit}
+            onSubmit={handleGenerate}
             loading={loading}
+            hasRoute={hasRoute}
           />
 
-          {stage === STAGES.GEOCODING && <p className="status-line">Locating your address…</p>}
-          {stage === STAGES.FETCHING && <p className="status-line">Reading streets and trails nearby…</p>}
-          {stage === STAGES.PLOTTING && <p className="status-line">Testing routes for the best loop…</p>}
           {error && <p className="status-line status-error">{error}</p>}
           {notice && <p className="tolerance-note">{notice}</p>}
 
@@ -309,8 +339,6 @@ export default function App() {
               summary={summary}
               segments={segments}
               elevation={elevation}
-              onRegenerate={handleRegenerate}
-              regenerating={regenerating}
               onExportTcx={handleExportTcx}
               onExportGpx={handleExportGpx}
             />
@@ -343,6 +371,12 @@ export default function App() {
 
         <main className="map-pane">
           <MapView start={start} polylineRuns={polylineRuns} directionArrows={directionArrows} />
+          {loading && (
+            <div className="map-loading-overlay">
+              <div className="map-loading-spinner" aria-hidden="true" />
+              <p className="map-loading-text">{STAGE_MESSAGES[stage] || 'Working…'}</p>
+            </div>
+          )}
         </main>
       </div>
     </div>

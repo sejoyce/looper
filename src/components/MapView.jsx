@@ -31,13 +31,13 @@ export default function MapView({ start, polylineRuns, directionArrows }) {
       zoomControl: true,
     }).setView([39.9526, -75.1652], 13)
 
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-      // A muted, mostly-monochrome basemap (CARTO Positron) so the route
-      // itself is the most visually prominent thing on the map, instead of
-      // competing with a busy, colorful default street-map style.
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-      maxZoom: 19,
-      subdomains: 'abcd',
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+      // A muted, mostly-monochrome basemap (Esri Light Gray Canvas) so the
+      // route itself is the most visually prominent thing on the map,
+      // instead of competing with a busy, colorful default street-map
+      // style. Free to use without an API key, unlike CARTO's basemaps.
+      attribution: 'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      maxZoom: 16,
     }).addTo(map)
 
     layerGroupRef.current = L.layerGroup().addTo(map)
@@ -65,9 +65,9 @@ export default function MapView({ start, polylineRuns, directionArrows }) {
     if (start) {
       L.circleMarker([start.lat, start.lon], {
         radius: 8,
-        color: '#20261D',
+        color: '#1A2B33',
         weight: 2,
-        fillColor: '#C68A1E',
+        fillColor: '#E69F00',
         fillOpacity: 1,
       })
         .bindTooltip('Start / Finish', { permanent: false })

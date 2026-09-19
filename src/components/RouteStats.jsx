@@ -8,7 +8,7 @@ function metersToFeet(m) {
   return m * 3.28084
 }
 
-export default function RouteStats({ summary, segments, onRegenerate, regenerating, onExportTcx, onExportGpx, elevation }) {
+export default function RouteStats({ summary, segments, onExportTcx, onExportGpx, elevation }) {
   if (!summary) return null
 
   return (
@@ -45,10 +45,6 @@ export default function RouteStats({ summary, segments, onRegenerate, regenerati
           <span className="stat-label">ft elevation gain</span>
         </div>
       </div>
-
-      <button className="btn-secondary" onClick={onRegenerate} disabled={regenerating}>
-        {regenerating ? 'Re-plotting…' : 'Try a different loop'}
-      </button>
 
       <div className="export-row">
         <button className="btn-export" onClick={onExportTcx}>

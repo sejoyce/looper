@@ -3,7 +3,7 @@ import { useState } from 'react'
 export default function RouteForm({
   address, setAddress, miles, setMiles,
   minElevation, setMinElevation, maxElevation, setMaxElevation,
-  onSubmit, loading,
+  onSubmit, loading, hasRoute,
 }) {
   const [showAdvanced, setShowAdvanced] = useState(false)
 
@@ -74,8 +74,8 @@ export default function RouteForm({
         </div>
       )}
 
-      <button type="submit" className="btn-primary" disabled={loading}>
-        {loading ? 'Plotting loop…' : 'Find my loop'}
+      <button type="submit" className={`btn-primary${hasRoute ? ' is-regenerate' : ''}`} disabled={loading}>
+        {loading ? 'Plotting loop…' : hasRoute ? 'Try a different loop' : 'Find my loop'}
       </button>
     </form>
   )
