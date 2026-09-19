@@ -47,12 +47,15 @@ export default function RouteStats({ summary, segments, onExportTcx, onExportGpx
       </div>
 
       <div className="export-row">
-        <button className="btn-export" onClick={onExportTcx}>
-          Export for Garmin (.tcx)
-        </button>
-        <button className="btn-export" onClick={onExportGpx}>
-          Export GPX
-        </button>
+        <span className="field-label export-label">Export route</span>
+        <div className="export-buttons">
+          <button className="btn-export" onClick={onExportTcx}>
+            Export for Garmin (.tcx)
+          </button>
+          <button className="btn-export" onClick={onExportGpx}>
+            Export GPX
+          </button>
+        </div>
       </div>
 
       <div className="segments">

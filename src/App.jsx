@@ -8,7 +8,7 @@ import { buildGraph, snapStartToNetwork, analyzeDeadEnds } from './lib/graph'
 import { generateLoopRoute, summarizeSegments, routeToPolylineRuns, computeDirectionArrows } from './lib/routeGenerator'
 import { computeRouteElevation } from './lib/elevation'
 import { buildTcxCourse, buildGpx, downloadFile } from './lib/exportCourse'
-import { milesToMeters, radiusForTargetMiles } from './lib/geo'
+import { milesToMeters, radiusForTargetMiles, metersToMiles } from './lib/geo'
 import { compareRoutes, isMeaningfullyWorse } from './lib/routeComparison'
 
 const STAGES = {
@@ -28,6 +28,10 @@ const STAGE_MESSAGES = {
 
 const METERS_PER_FOOT = 0.3048
 const MAX_HISTORY = 8
+
+function yieldToBrowser() {
+  return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+}
 
 async function pickBestCandidateWithElevation(graph, startNodeId, targetMeters, seed, elevationPrefs) {
   const candidates = []
@@ -103,6 +107,14 @@ export default function App() {
   }
 
   const plot = useCallback(async (graph, startNodeId, targetMeters, seed, elevationPrefs) => {
+    // The route search below is synchronous, CPU-bound JS - without a real
+    // await first, it can start running before the browser has painted the
+    // "loading" state that was just set, so the spinner never actually
+    // becomes visible until the (possibly multi-second) computation is
+    // already done. Yielding here first (via double rAF, so it waits for an
+    // actual paint rather than just the next microtask) fixes that.
+    await yieldToBrowser()
+
     const hasPref = elevationPrefs.minFt != null || elevationPrefs.maxFt != null
 
     if (hasPref) {
@@ -118,10 +130,19 @@ export default function App() {
       }
     }
 
+    // Try a few seeds and keep the best, so a single unlucky attempt
+    // doesn't produce a worse result than the area actually supports - but
+    // stop as soon as one is already clean and on-target, since each
+    // attempt re-runs the full search and this was the single biggest cost
+    // in regenerating (3x the cost of one search, every time, even when
+    // the very first attempt was already great).
     let route = null
     for (let i = 0; i < 3; i++) {
       const candidate = generateLoopRoute(graph, startNodeId, targetMeters, { seed: seed + i * 13337 })
       if (candidate && (!route || compareRoutes(candidate, route) < 0)) route = candidate
+      if (route && route.withinTolerance && route.tinyLoopCount === 0 && route.turnCount / metersToMiles(route.distanceMeters) <= 14) {
+        break
+      }
     }
     if (!route) return null
     return {
@@ -302,6 +323,7 @@ export default function App() {
       <header className="app-header">
         <div className="header-inner">
           <h1>Looper</h1>
+          <p className="tagline">Trail-first running loops from your front door.</p>
         </div>
         <svg className="header-squiggle" viewBox="0 0 400 24" preserveAspectRatio="none" aria-hidden="true">
           <polyline

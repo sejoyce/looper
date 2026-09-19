@@ -63,10 +63,12 @@ export default function MapView({ start, polylineRuns, directionArrows }) {
     layerGroup.clearLayers()
 
     if (start) {
-      L.circleMarker([start.lat, start.lon], {
-        radius: 8,
-        color: '#1A2B33',
-        weight: 2,
+      // L.circle uses a radius in meters, so the marker scales naturally
+      // with the map instead of staying a fixed pixel size (which is what
+      // made it look oversized when zoomed out with circleMarker).
+      L.circle([start.lat, start.lon], {
+        radius: 9,
+        stroke: false,
         fillColor: '#E69F00',
         fillOpacity: 1,
       })

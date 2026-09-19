@@ -461,7 +461,7 @@ function findPreciseLoop(graph, startId, targetMeters, options = {}) {
 // Finds the biggest, cleanest simple loop available (used as the repeating
 // unit when the target distance isn't reachable as one loop).
 function findBiggestCleanLoop(graph, startId, targetMeters, options = {}) {
-  const { seed = 99, attempts = 12, timeBudgetMs = 1800 } = options
+  const { seed = 99, attempts = 12, timeBudgetMs = 1400 } = options
   let best = null
   let bestScore = -Infinity
   const searchStart = performance.now()
@@ -500,7 +500,7 @@ function findWaypointLoop(graph, startId, targetMeters, options = {}) {
   const target = pickTargetCluster(graph, startId, targetMeters * maxReachFraction)
   if (!target) return null
 
-  const toTrail = shortestPathBack(graph, startId, target.accessNodeId, new Set(), { timeBudgetMs: 1000 })
+  const toTrail = shortestPathBack(graph, startId, target.accessNodeId, new Set(), { timeBudgetMs: 700 })
   if (!toTrail || toTrail.distance >= targetMeters) return null
 
   let best = null
@@ -517,7 +517,7 @@ function findWaypointLoop(graph, startId, targetMeters, options = {}) {
     if (remaining <= 0) continue
 
     const home = bucketedReturnPath(graph, exploreWalk.endNode, startId, exploreWalk.usedForward, remaining, {
-      timeBudgetMs: 900,
+      timeBudgetMs: 600,
     })
     if (!home) continue
 
@@ -546,8 +546,18 @@ function findWaypointLoop(graph, startId, targetMeters, options = {}) {
 // specific attempt/seed.
 function computeBackboneLoop(graph, startId, targetMeters) {
   const maxReachMeters = Math.max(500, targetMeters * 0.5)
-  const hullNodeIds = selectHullNodeIds(graph, startId, maxReachMeters)
+  let hullNodeIds = selectHullNodeIds(graph, startId, maxReachMeters)
   if (hullNodeIds.length < 3) return new Set()
+
+  // A real, irregular street network's boundary can have far more hull
+  // vertices than a clean grid's 4 corners - cap how many we actually chain
+  // together (each one costs a pathfinding call), evenly downsampled so
+  // the overall perimeter shape is preserved rather than just truncated.
+  const MAX_HULL_POINTS = 10
+  if (hullNodeIds.length > MAX_HULL_POINTS) {
+    const step = hullNodeIds.length / MAX_HULL_POINTS
+    hullNodeIds = Array.from({ length: MAX_HULL_POINTS }, (_, i) => hullNodeIds[Math.floor(i * step)])
+  }
 
   // Start the perimeter walk from whichever hull node is closest to home,
   // so joining the backbone isn't itself a long detour.
@@ -567,9 +577,11 @@ function computeBackboneLoop(graph, startId, targetMeters) {
 
   const backboneEdges = new Set()
   const usedForward = new Set()
+  const overallDeadline = performance.now() + 1800 // this is a bonus feature, not core correctness
   for (let i = 0; i < sequence.length - 1; i++) {
     if (sequence[i] === sequence[i + 1]) continue
-    const leg = shortestPathBack(graph, sequence[i], sequence[i + 1], usedForward, { timeBudgetMs: 700 })
+    if (performance.now() > overallDeadline) break // a partial backbone still helps; an unbounded one can't stall route generation
+    const leg = shortestPathBack(graph, sequence[i], sequence[i + 1], usedForward, { timeBudgetMs: 300 })
     if (!leg) continue // an unreachable hull point just gets skipped, not fatal
     for (const key of leg.path) {
       backboneEdges.add(key)
@@ -616,7 +628,7 @@ export function generateLoopRoute(graph, startNodeId, targetMeters, options = {}
   const seed = options.seed ?? Date.now()
 
   const precise = findPreciseLoop(graph, startNodeId, targetMeters, {
-    seed, toleranceMeters, timeBudgetMs: options.timeBudgetMs ?? 4000,
+    seed, toleranceMeters, timeBudgetMs: options.timeBudgetMs ?? 3000,
   })
 
   // Always try to find a loop that deliberately reaches out to a nearby

@@ -333,9 +333,19 @@ input[type='text']:focus, input[type='number']:focus {
 
 /* ---- Export buttons ---- */
 .export-row {
+  margin-top: 1rem;
+  padding-top: 0.9rem;
+  border-top: 1px dashed var(--contour);
+}
+
+.export-label {
+  display: block;
+  margin-bottom: 0.5rem;
+}
+
+.export-buttons {
   display: flex;
   gap: 0.5rem;
-  margin-top: 0.6rem;
 }
 
 .btn-export {
