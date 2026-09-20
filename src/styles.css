@@ -459,6 +459,9 @@ input[type='text']:focus, input[type='number']:focus {
 }
 .legend-swatch.trail { background: var(--route-trail); }
 .legend-swatch.street { background: var(--route-street); }
+.legend-swatch.repeat {
+  background: repeating-linear-gradient(90deg, var(--contour) 0 4px, transparent 4px 8px);
+}
 
 /* ---- Responsive ---- */
 @media (max-width: 820px) {

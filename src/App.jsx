@@ -5,7 +5,7 @@ import MapView from './components/MapView'
 import RouteThumbnail from './components/RouteThumbnail'
 import { geocodeAddress, fetchStreetGraph } from './lib/osm'
 import { buildGraph, snapStartToNetwork, analyzeDeadEnds } from './lib/graph'
-import { generateLoopRoute, summarizeSegments, routeToPolylineRuns, computeDirectionArrows } from './lib/routeGenerator'
+import { generateLoopRoute, summarizeSegments, routeToPolylineRuns, computeDirectionArrows, computeRenderSegments } from './lib/routeGenerator'
 import { computeRouteElevation } from './lib/elevation'
 import { buildTcxCourse, buildGpx, downloadFile } from './lib/exportCourse'
 import { milesToMeters, radiusForTargetMiles, metersToMiles } from './lib/geo'
@@ -82,6 +82,7 @@ export default function App() {
   const [summary, setSummary] = useState(null)
   const [segments, setSegments] = useState(null)
   const [polylineRuns, setPolylineRuns] = useState(null)
+  const [renderSegments, setRenderSegments] = useState(null)
   const [directionArrows, setDirectionArrows] = useState(null)
   const [elevation, setElevation] = useState(null)
   const [history, setHistory] = useState([])
@@ -124,6 +125,7 @@ export default function App() {
         summary: planned.route,
         segments: summarizeSegments(graph, planned.route.edgeKeys),
         polylineRuns: routeToPolylineRuns(graph, planned.route.edgeKeys),
+        renderSegments: computeRenderSegments(graph, planned.route.edgeKeys),
         directionArrows: computeDirectionArrows(graph, planned.route.edgeKeys),
         elevation: planned.elevation,
         elevationPromise: null,
@@ -149,6 +151,7 @@ export default function App() {
       summary: route,
       segments: summarizeSegments(graph, route.edgeKeys),
       polylineRuns: routeToPolylineRuns(graph, route.edgeKeys),
+      renderSegments: computeRenderSegments(graph, route.edgeKeys),
       directionArrows: computeDirectionArrows(graph, route.edgeKeys),
       elevation: null,
       elevationPromise: computeRouteElevation(graph, route.edgeKeys),
@@ -169,6 +172,7 @@ export default function App() {
     setSummary(result.summary)
     setSegments(result.segments)
     setPolylineRuns(result.polylineRuns)
+    setRenderSegments(result.renderSegments)
     setDirectionArrows(result.directionArrows)
     setElevation(result.elevation)
     if (result.elevationPromise) {
@@ -260,12 +264,27 @@ export default function App() {
     setError(null)
     setNotice(null)
     setStage(STAGES.PLOTTING)
-    seedRef.current += 1
     try {
       const elevationPrefs = currentElevationPrefs()
-      const result = await plot(graphRef.current, startNodeRef.current, targetMetersRef.current, seedRef.current, elevationPrefs)
 
-      if (!result || isMeaningfullyWorse(result.summary, summary)) {
+      // plot() already tries a few seeds internally and stops early once
+      // one looks good - but "good enough to stop early" and "good enough
+      // to beat what's already on screen" are different bars, and seed
+      // variance means a single round can still come up short even when a
+      // better loop is readily findable. Try a few full rounds (each with
+      // a fresh seed) before concluding there's genuinely nothing better,
+      // rather than giving up after just one.
+      let result = null
+      for (let round = 0; round < 4; round++) {
+        seedRef.current += 1
+        const attempt = await plot(graphRef.current, startNodeRef.current, targetMetersRef.current, seedRef.current, elevationPrefs)
+        if (attempt && !isMeaningfullyWorse(attempt.summary, summary)) {
+          result = attempt
+          break
+        }
+      }
+
+      if (!result) {
         setNotice(
           "That's the best loop this street network has to offer near your target - no better distinct option found. Showing your last result."
         )
@@ -302,6 +321,7 @@ export default function App() {
     setSummary(entry.summary)
     setSegments(entry.segments)
     setPolylineRuns(entry.polylineRuns)
+    setRenderSegments(entry.renderSegments)
     setDirectionArrows(entry.directionArrows)
     setElevation(entry.elevation)
   }
@@ -323,7 +343,6 @@ export default function App() {
       <header className="app-header">
         <div className="header-inner">
           <h1>Looper</h1>
-          <p className="tagline">Trail-first running loops from your front door.</p>
         </div>
         <svg className="header-squiggle" viewBox="0 0 400 24" preserveAspectRatio="none" aria-hidden="true">
           <polyline
@@ -356,16 +375,6 @@ export default function App() {
           {error && <p className="status-line status-error">{error}</p>}
           {notice && <p className="tolerance-note">{notice}</p>}
 
-          {summary && (
-            <RouteStats
-              summary={summary}
-              segments={segments}
-              elevation={elevation}
-              onExportTcx={handleExportTcx}
-              onExportGpx={handleExportGpx}
-            />
-          )}
-
           {history.length > 1 && (
             <div className="history-section">
               <span className="field-label">Loops you've generated</span>
@@ -385,14 +394,25 @@ export default function App() {
             </div>
           )}
 
+          {summary && (
+            <RouteStats
+              summary={summary}
+              segments={segments}
+              elevation={elevation}
+              onExportTcx={handleExportTcx}
+              onExportGpx={handleExportGpx}
+            />
+          )}
+
           <p className="legend">
             <span className="legend-swatch trail" /> trail &nbsp;
-            <span className="legend-swatch street" /> street
+            <span className="legend-swatch street" /> street &nbsp;
+            <span className="legend-swatch repeat" /> repeat pass
           </p>
         </aside>
 
         <main className="map-pane">
-          <MapView start={start} polylineRuns={polylineRuns} directionArrows={directionArrows} />
+          <MapView start={start} renderSegments={renderSegments} directionArrows={directionArrows} />
           {loading && (
             <div className="map-loading-overlay">
               <div className="map-loading-spinner" aria-hidden="true" />

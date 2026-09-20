@@ -19,7 +19,7 @@ L.Icon.Default.mergeOptions({
 const TRAIL_COLOR = '#009E73' // bluish green
 const STREET_COLOR = '#0072B2' // blue
 
-export default function MapView({ start, polylineRuns, directionArrows }) {
+export default function MapView({ start, renderSegments, directionArrows }) {
   const mapRef = useRef(null)
   const containerRef = useRef(null)
   const layerGroupRef = useRef(null)
@@ -62,6 +62,47 @@ export default function MapView({ start, polylineRuns, directionArrows }) {
     if (!map || !layerGroup) return
     layerGroup.clearLayers()
 
+    if (renderSegments && renderSegments.length > 0) {
+      const bounds = []
+      for (const seg of renderSegments) {
+        const color = seg.isTrail ? TRAIL_COLOR : STREET_COLOR
+        const repeated = seg.passIndex > 1
+        L.polyline(seg.points, {
+          color,
+          weight: seg.isTrail ? 5 : 4,
+          // A repeated pass (an entire lap re-run, or just crossing the
+          // same block twice) is nudged sideways in computeRenderSegments
+          // and drawn dashed here, so multiple passes over the same street
+          // read as clearly separate lines instead of one indistinguishable
+          // overlap.
+          opacity: repeated ? 0.85 : 0.9,
+          dashArray: repeated ? '7, 7' : seg.isTrail ? null : undefined,
+          lineCap: 'round',
+        }).addTo(layerGroup)
+        bounds.push(...seg.points)
+      }
+      if (bounds.length > 0) {
+        map.fitBounds(bounds, { padding: [32, 32] })
+      }
+    }
+
+    if (directionArrows && directionArrows.length > 0) {
+      for (const arrow of directionArrows) {
+        const color = arrow.isTrail ? TRAIL_COLOR : STREET_COLOR
+        const icon = L.divIcon({
+          className: 'direction-arrow-icon',
+          html: `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;transform:rotate(${arrow.bearing}deg);opacity:${arrow.passIndex > 1 ? 0.8 : 1}">
+            <svg width="15" height="15" viewBox="0 0 14 14"><polygon points="7,1 12,12 7,8.5 2,12" fill="${color}" stroke="#ffffff" stroke-width="1"/></svg>
+          </div>`,
+          iconSize: [15, 15],
+          iconAnchor: [7, 7],
+        })
+        L.marker([arrow.lat, arrow.lon], { icon, interactive: false }).addTo(layerGroup)
+      }
+    }
+
+    // Drawn last so it renders on top of the route lines and arrows,
+    // rather than sitting underneath them.
     if (start) {
       // L.circle uses a radius in meters, so the marker scales naturally
       // with the map instead of staying a fixed pixel size (which is what
@@ -75,40 +116,7 @@ export default function MapView({ start, polylineRuns, directionArrows }) {
         .bindTooltip('Start / Finish', { permanent: false })
         .addTo(layerGroup)
     }
-
-    if (polylineRuns && polylineRuns.length > 0) {
-      const bounds = []
-      for (const run of polylineRuns) {
-        const color = run.isTrail ? TRAIL_COLOR : STREET_COLOR
-        L.polyline(run.points, {
-          color,
-          weight: run.isTrail ? 5 : 4,
-          opacity: 0.9,
-          dashArray: run.isTrail ? null : undefined,
-          lineCap: 'round',
-        }).addTo(layerGroup)
-        bounds.push(...run.points)
-      }
-      if (bounds.length > 0) {
-        map.fitBounds(bounds, { padding: [32, 32] })
-      }
-    }
-
-    if (directionArrows && directionArrows.length > 0) {
-      for (const arrow of directionArrows) {
-        const color = arrow.isTrail ? TRAIL_COLOR : STREET_COLOR
-        const icon = L.divIcon({
-          className: 'direction-arrow-icon',
-          html: `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;transform:rotate(${arrow.bearing}deg)">
-            <svg width="15" height="15" viewBox="0 0 14 14"><polygon points="7,1 12,12 7,8.5 2,12" fill="${color}" stroke="#ffffff" stroke-width="1"/></svg>
-          </div>`,
-          iconSize: [15, 15],
-          iconAnchor: [7, 7],
-        })
-        L.marker([arrow.lat, arrow.lon], { icon, interactive: false }).addTo(layerGroup)
-      }
-    }
-  }, [polylineRuns, directionArrows, start])
+  }, [renderSegments, directionArrows, start])
 
   return <div ref={containerRef} className="map-canvas" role="img" aria-label="Route map" />
 }

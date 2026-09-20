@@ -31,6 +31,27 @@ export function angleDiff(b1, b2) {
   return diff > 180 ? 360 - diff : diff
 }
 
+// Destination point given a start point, a bearing, and a distance -
+// used to nudge a route segment sideways by a small amount so a repeated
+// pass over the same street renders as a visibly separate, parallel line
+// instead of perfectly overlapping the first pass.
+export function offsetPoint(lat, lon, bearingDeg, distMeters) {
+  const R = 6371000
+  const brng = toRad(bearingDeg)
+  const latRad = toRad(lat)
+  const angDist = distMeters / R
+  const newLatRad = Math.asin(
+    Math.sin(latRad) * Math.cos(angDist) + Math.cos(latRad) * Math.sin(angDist) * Math.cos(brng)
+  )
+  const newLonRad =
+    toRad(lon) +
+    Math.atan2(
+      Math.sin(brng) * Math.sin(angDist) * Math.cos(latRad),
+      Math.cos(angDist) - Math.sin(latRad) * Math.sin(newLatRad)
+    )
+  return { lat: (newLatRad * 180) / Math.PI, lon: (newLonRad * 180) / Math.PI }
+}
+
 export function metersToMiles(m) {
   return m / 1609.344
 }

@@ -1,5 +1,5 @@
 import { MinHeap } from './minHeap.js'
-import { bearing, angleDiff, haversine, milesToMeters, metersToMiles } from './geo.js'
+import { bearing, angleDiff, haversine, milesToMeters, metersToMiles, offsetPoint } from './geo.js'
 import { pickTargetCluster } from './trailSeeking.js'
 import { selectHullNodeIds } from './backbone.js'
 
@@ -736,23 +736,76 @@ export function routeToPolylineRuns(graph, edgeKeys) {
   return runs
 }
 
+// One render segment per edge (not merged the way routeToPolylineRuns is),
+// so a street or trail segment that's traversed more than once - whether
+// from an entire lap repeating, or just crossing the same block twice on
+// different parts of the loop - can be nudged sideways and dashed to
+// render as a visibly separate, parallel line instead of perfectly
+// overlapping the first pass and being indistinguishable from it.
+export function computeRenderSegments(graph, edgeKeys, offsetMeters = 3.5) {
+  const passCounts = new Map() // canonical (direction-independent) segment id -> passes seen so far
+  const segments = []
+
+  edgeKeys.forEach((key) => {
+    const edge = graph.edges.get(key)
+    const canonicalId = edge.key < edge.reverseKey ? edge.key : edge.reverseKey
+    const passIndex = (passCounts.get(canonicalId) || 0) + 1
+    passCounts.set(canonicalId, passIndex)
+
+    const from = graph.nodes.get(edge.from)
+    const to = graph.nodes.get(edge.to)
+    let p1 = { lat: from.lat, lon: from.lon }
+    let p2 = { lat: to.lat, lon: to.lon }
+
+    if (passIndex > 1) {
+      const perpBearing = (bearing(from.lat, from.lon, to.lat, to.lon) + 90) % 360
+      const dist = (passIndex - 1) * offsetMeters
+      p1 = offsetPoint(p1.lat, p1.lon, perpBearing, dist)
+      p2 = offsetPoint(p2.lat, p2.lon, perpBearing, dist)
+    }
+
+    segments.push({
+      points: [[p1.lat, p1.lon], [p2.lat, p2.lon]],
+      isTrail: edge.isTrail,
+      passIndex,
+    })
+  })
+
+  return segments
+}
+
 // Places direction-of-travel arrows along the route at roughly even
 // spacing, each with the compass bearing of travel at that point - used to
 // show which way to run the loop on the map.
-export function computeDirectionArrows(graph, edgeKeys, spacingMeters = 220) {
+export function computeDirectionArrows(graph, edgeKeys, spacingMeters = 220, offsetMeters = 3.5) {
   const arrows = []
+  const passCounts = new Map()
   let sinceLast = spacingMeters * 0.5 // place one reasonably early, not just at the very end of the first gap
   edgeKeys.forEach((key) => {
     const edge = graph.edges.get(key)
+    const canonicalId = edge.key < edge.reverseKey ? edge.key : edge.reverseKey
+    const passIndex = (passCounts.get(canonicalId) || 0) + 1
+    passCounts.set(canonicalId, passIndex)
+
     const from = graph.nodes.get(edge.from)
     const to = graph.nodes.get(edge.to)
     sinceLast += edge.distance
     if (sinceLast >= spacingMeters && edge.distance > 5) {
+      const edgeBearingDeg = bearing(from.lat, from.lon, to.lat, to.lon)
+      let midLat = (from.lat + to.lat) / 2
+      let midLon = (from.lon + to.lon) / 2
+      if (passIndex > 1) {
+        const perpBearing = (edgeBearingDeg + 90) % 360
+        const offset = offsetPoint(midLat, midLon, perpBearing, (passIndex - 1) * offsetMeters)
+        midLat = offset.lat
+        midLon = offset.lon
+      }
       arrows.push({
-        lat: (from.lat + to.lat) / 2,
-        lon: (from.lon + to.lon) / 2,
-        bearing: bearing(from.lat, from.lon, to.lat, to.lon),
+        lat: midLat,
+        lon: midLon,
+        bearing: edgeBearingDeg,
         isTrail: edge.isTrail,
+        passIndex,
       })
       sinceLast = 0
     }
