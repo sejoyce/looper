@@ -2,7 +2,10 @@
 
 Generates a runnable **loop route** from an address and a target mileage — favoring trails, avoiding traffic lights and dead ends, and never doubling back on the same street segment. Reports elevation gain, and can optionally target a minimum or maximum amount of climbing.
 
+<img width="3837" height="1737" alt="demo" src="https://github.com/user-attachments/assets/0d7a167b-558f-4cf8-b530-9724bcfb1b30" />
+
 Everything runs client-side in the browser (geocoding + street data + route search + elevation), so it deploys as a static site with no server or API keys to manage.
+
 
 ## How it works
 
