@@ -58,37 +58,6 @@ What *does* work today, for free, with no developer account: the **Export for Ga
 
 The plain **Export GPX** button is there as a broader-compatibility fallback (Strava, other GPS watches, etc.) — GPX doesn't have the same standardized turn-cue schema, so it'll show the route shape but not turn-by-turn prompts.
 
-## Run it locally
-
-```bash
-npm install
-npm run dev
-```
-
-Opens at `http://localhost:5173`.
-
-## Deploy to your GitHub account
-
-This repo already includes a GitHub Actions workflow (`.github/workflows/deploy.yml`) that builds and publishes to GitHub Pages automatically on every push to `main`.
-
-1. Create a new repository on GitHub (public or private — Pages works for both on a paid plan; public repos get Pages free).
-2. Push this project to it:
-   ```bash
-   git init
-   git add .
-   git commit -m "Initial commit"
-   git branch -M main
-   git remote add origin https://github.com/YOUR_USERNAME/YOUR_REPO.git
-   git push -u origin main
-   ```
-3. On GitHub, go to **Settings → Pages**, and under **Build and deployment**, set **Source** to **GitHub Actions**.
-4. Push (or re-run the workflow from the **Actions** tab) — after it finishes, your app will be live at:
-   ```
-   https://YOUR_USERNAME.github.io/YOUR_REPO/
-   ```
-
-No build configuration changes are needed — `vite.config.js` already uses a relative base path so it works under any repo name.
-
 ## Notes and limitations
 
 - **Address autocomplete** depends on Photon's public service being reachable in addition to Nominatim/Overpass/Open-Elevation/Esri. Suggestions are debounced (350ms) and require at least 3 characters before querying, to stay well within reasonable personal-use limits on a free service.
