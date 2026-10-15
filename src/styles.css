@@ -180,6 +180,44 @@ input[type='text']:focus, input[type='number']:focus {
   outline-offset: 1px;
 }
 
+/* ---- Address autocomplete ---- */
+.address-field-wrap {
+  position: relative;
+}
+
+.address-field-wrap input {
+  width: 100%;
+}
+
+.address-suggestions {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  right: 0;
+  z-index: 50;
+  margin: 0;
+  padding: 0.25rem 0;
+  list-style: none;
+  background: #fff;
+  border: 1.5px solid var(--contour);
+  border-radius: 4px;
+  box-shadow: 0 6px 16px rgba(23, 35, 43, 0.18);
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.address-suggestions li {
+  padding: 0.5rem 0.7rem;
+  font-size: 0.88rem;
+  cursor: pointer;
+  line-height: 1.3;
+}
+
+.address-suggestions li.is-active,
+.address-suggestions li:hover {
+  background: var(--paper);
+}
+
 /* ---- Route history ---- */
 .history-section {
   margin-top: 1.2rem;
@@ -481,4 +519,20 @@ input[type='text']:focus, input[type='number']:focus {
   .app-header h1 {
     font-size: 1.6rem;
   }
+}
+
+.address-searching {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.75rem;
+  color: #5b7385;
+  pointer-events: none;
+}
+
+.address-hint {
+  margin-top: 4px;
+  font-size: 0.75rem;
+  color: #5b7385;
 }

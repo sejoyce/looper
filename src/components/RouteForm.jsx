@@ -1,7 +1,8 @@
 import { useState } from 'react'
+import AddressField from './AddressField'
 
 export default function RouteForm({
-  address, setAddress, miles, setMiles,
+  address, setAddress, onAddressSelect, miles, setMiles,
   minElevation, setMinElevation, maxElevation, setMaxElevation,
   onSubmit, loading, hasRoute,
 }) {
@@ -16,13 +17,7 @@ export default function RouteForm({
     <form className="route-form" onSubmit={handleSubmit}>
       <label className="field">
         <span className="field-label">Starting address</span>
-        <input
-          type="text"
-          value={address}
-          onChange={(e) => setAddress(e.target.value)}
-          placeholder="1234 Spruce St, Philadelphia, PA"
-          required
-        />
+        <AddressField value={address} onChange={setAddress} onSelect={onAddressSelect} />
       </label>
 
       <label className="field">
@@ -34,6 +29,7 @@ export default function RouteForm({
           min="0.5"
           max="26"
           step="0.25"
+          placeholder="e.g. 5"
           required
         />
       </label>

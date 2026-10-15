@@ -12,7 +12,7 @@ const OVERPASS_ENDPOINTS = [
 ]
 
 export async function geocodeAddress(address) {
-  const url = `${NOMINATIM_URL}?format=json&limit=1&q=${encodeURIComponent(address)}`
+  const url = `${NOMINATIM_URL}?format=json&limit=5&addressdetails=1&q=${encodeURIComponent(address)}`
   const res = await fetch(url, {
     headers: { Accept: 'application/json' },
   })
@@ -21,10 +21,20 @@ export async function geocodeAddress(address) {
   if (!data || data.length === 0) {
     throw new Error(`Couldn't find "${address}". Try adding a city and state.`)
   }
+  // When a house number was typed, only accept a result that actually has one.
+  // Otherwise Nominatim falls back to the middle (or far end) of the street,
+  // and the loop would start somewhere other than the entered address.
+  const wantsNumber = /^\s*\d+/.test(address)
+  const best = wantsNumber ? data.find((d) => d.address && d.address.house_number) : data[0]
+  if (!best) {
+    throw new Error(
+      `Couldn't find that exact house number. Pick a suggestion from the dropdown, or add the city and state (e.g. "${address}, Wilmington, DE").`
+    )
+  }
   return {
-    lat: parseFloat(data[0].lat),
-    lon: parseFloat(data[0].lon),
-    displayName: data[0].display_name,
+    lat: parseFloat(best.lat),
+    lon: parseFloat(best.lon),
+    displayName: best.display_name,
   }
 }
 

@@ -32,7 +32,17 @@ function edgeWeight(graph, edge, toNode, prevEdge, usedForward) {
   if (edge.isTrail) w *= 0.5
   if (graph.backboneEdges?.has(edge.key)) w *= 0.55
   if (toNode?.hasSignal) w *= 1.12
-  if (usedForward.has(edge.key)) w *= 1.75
+  // Escalating, not flat: reusing an edge once is a mild, often-reasonable
+  // choice (revisiting a street from a different direction, say), but
+  // reusing the SAME edge repeatedly (looping the same small trail or
+  // block over and over to pad distance) needs to get expensive fast. The
+  // base here is deliberately steep (>2x) so that even the very first
+  // reuse of a trail edge (which already has a 0.5x discount) comes out
+  // more expensive than a fresh, undiscounted edge - otherwise a short,
+  // cheap loop can look "efficient" enough circling back on itself rather
+  // than the search ever bothering to go explore fresh ground.
+  const reuseCount = usedForward.get(edge.key) || 0
+  if (reuseCount > 0) w *= Math.pow(2.3, reuseCount)
 
   const { kind } = classifyTurn(graph, prevEdge, edge)
   if (prevEdge && prevEdge.name === edge.name && kind !== 'sharp') w *= 0.8
@@ -53,9 +63,25 @@ function edgeWeight(graph, edge, toNode, prevEdge, usedForward) {
 // only possible way to leave and return home, so it's allowed both ways.
 // Otherwise, normal edges are legal as long as their exact reverse hasn't
 // already been used.
+// A loop with no internal branches (a simple circular trail, say) can
+// leave a search with literally only one legal edge to take at each step
+// once inside it - in that situation a weight penalty can't help, since
+// there's no alternative to weigh it against, and the search is forced
+// around the loop however many times it takes to reach a real decision
+// point. This hard cap is the backstop for exactly that case: once an
+// edge has been used twice already, a third use is illegal outright,
+// rather than just discouraged, so the search structurally cannot loop
+// the same small trail five or more times on its own. Deliberate laps
+// (an entire small loop repeated a controlled number of times when the
+// area genuinely can't support one bigger loop) bypass this - they're
+// built by directly repeating an already-found route, not discovered by
+// a search re-choosing the same edges over and over.
+const MAX_EDGE_REUSE = 2
+
 function isLegal(edge, usedForward, graph) {
   if (graph.reversalExempt.has(edge.key)) return true
   if (graph.hardExcluded.has(edge.key)) return false
+  if ((usedForward.get(edge.key) || 0) >= MAX_EDGE_REUSE) return false
   return !usedForward.has(edge.reverseKey)
 }
 
@@ -107,6 +133,16 @@ function mulberry32(seed) {
   }
 }
 
+// Builds a key -> use-count Map from a list of edge keys (which may itself
+// contain the same key more than once, e.g. a laps-repeated base loop) -
+// used wherever a set of "already committed" edges needs to be handed to
+// another search as its starting usedForward state.
+function toCountMap(edgeKeysArray) {
+  const m = new Map()
+  for (const k of edgeKeysArray) m.set(k, (m.get(k) || 0) + 1)
+  return m
+}
+
 // --- Outbound leg: weighted random walk -------------------------------------
 
 // Loops shorter than this read as pointless on a map (a little detour into
@@ -117,7 +153,7 @@ const MIN_LOOP_METERS = milesToMeters(0.1)
 
 function randomWalk(graph, startId, targetDistance, rng, maxSteps = 500, externalUsedForward = null) {
   const path = []
-  const usedForward = externalUsedForward ? new Set(externalUsedForward) : new Set()
+  const usedForward = externalUsedForward ? new Map(externalUsedForward) : new Map()
   let current = startId
   let last = null
   let distance = 0
@@ -144,7 +180,7 @@ function randomWalk(graph, startId, targetDistance, rng, maxSteps = 500, externa
 
     const choice = weightedPick(candidates, rng).edge
     path.push(choice.key)
-    usedForward.add(choice.key)
+    usedForward.set(choice.key, (usedForward.get(choice.key) || 0) + 1)
     distance += choice.distance
     if (!visitedAt.has(choice.to)) visitedAt.set(choice.to, distance)
     last = choice
@@ -500,7 +536,7 @@ function findWaypointLoop(graph, startId, targetMeters, options = {}) {
   const target = pickTargetCluster(graph, startId, targetMeters * maxReachFraction)
   if (!target) return null
 
-  const toTrail = shortestPathBack(graph, startId, target.accessNodeId, new Set(), { timeBudgetMs: 700 })
+  const toTrail = shortestPathBack(graph, startId, target.accessNodeId, new Map(), { timeBudgetMs: 700 })
   if (!toTrail || toTrail.distance >= targetMeters) return null
 
   let best = null
@@ -508,7 +544,7 @@ function findWaypointLoop(graph, startId, targetMeters, options = {}) {
     const rng = mulberry32(seed + i * 50021)
     const remainingAfterOutbound = targetMeters - toTrail.distance
     const exploreFraction = 0.25 + (i / Math.max(tries - 1, 1)) * 0.4 + (rng() - 0.5) * 0.05
-    const usedSoFar = new Set(toTrail.path)
+    const usedSoFar = toCountMap(toTrail.path)
 
     const exploreWalk = randomWalk(graph, target.accessNodeId, remainingAfterOutbound * exploreFraction, rng, 400, usedSoFar)
     if (exploreWalk.path.length === 0) continue
@@ -576,7 +612,7 @@ function computeBackboneLoop(graph, startId, targetMeters) {
   const sequence = [startId, ...ordered, startId]
 
   const backboneEdges = new Set()
-  const usedForward = new Set()
+  const usedForward = new Map()
   const overallDeadline = performance.now() + 1800 // this is a bonus feature, not core correctness
   for (let i = 0; i < sequence.length - 1; i++) {
     if (sequence[i] === sequence[i + 1]) continue
@@ -585,7 +621,7 @@ function computeBackboneLoop(graph, startId, targetMeters) {
     if (!leg) continue // an unreachable hull point just gets skipped, not fatal
     for (const key of leg.path) {
       backboneEdges.add(key)
-      usedForward.add(key)
+      usedForward.set(key, (usedForward.get(key) || 0) + 1)
     }
   }
   return backboneEdges
@@ -673,7 +709,7 @@ export function generateLoopRoute(graph, startNodeId, targetMeters, options = {}
       // perspective, but the two pieces share one final route.
       remainderLoop = findPreciseLoop(graph, startNodeId, remainder, {
         seed: seed + 2, toleranceMeters, timeBudgetMs: 2500, sweeps: 8,
-        externalUsedForward: new Set(base.edgeKeys),
+        externalUsedForward: toCountMap(base.edgeKeys),
       })
       if (remainderLoop) combinedEdgeKeys = combinedEdgeKeys.concat(remainderLoop.edgeKeys)
     }

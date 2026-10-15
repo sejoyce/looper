@@ -72,7 +72,7 @@ async function pickBestCandidateWithElevation(graph, startNodeId, targetMeters, 
 
 export default function App() {
   const [address, setAddress] = useState('')
-  const [miles, setMiles] = useState('3')
+  const [miles, setMiles] = useState('')
   const [minElevation, setMinElevation] = useState('')
   const [maxElevation, setMaxElevation] = useState('')
   const [stage, setStage] = useState(STAGES.IDLE)
@@ -93,6 +93,7 @@ export default function App() {
   const targetMetersRef = useRef(null)
   const seedRef = useRef(0)
   const historyIdRef = useRef(0)
+  const selectedLocationRef = useRef(null) // suggestion the user picked: {label, lat, lon}
   const lastGeneratedRef = useRef(null) // { address, miles, minFt, maxFt }
 
   const loading = [STAGES.GEOCODING, STAGES.FETCHING, STAGES.PLOTTING].includes(stage)
@@ -216,7 +217,11 @@ export default function App() {
 
     try {
       setStage(STAGES.GEOCODING)
-      const location = await geocodeAddress(address)
+      const picked = selectedLocationRef.current
+      const location =
+        picked && picked.label === address
+          ? { lat: picked.lat, lon: picked.lon, displayName: picked.label }
+          : await geocodeAddress(address)
       setStart(location)
 
       setStage(STAGES.FETCHING)
@@ -360,6 +365,7 @@ export default function App() {
         <aside className="sidebar">
           <RouteForm
             address={address}
+            onAddressSelect={(s) => { selectedLocationRef.current = s }}
             setAddress={setAddress}
             miles={miles}
             setMiles={setMiles}
